@@ -44,7 +44,24 @@ export default function CatalogApp(){
  async function del(i:Img){if(!admin||!confirm("Bu görsel silinsin mi?"))return;if(i.storage_path){const r=await supabase.storage.from("katalog").remove([i.storage_path]);if(r.error)return alert(r.error.message)}const d=await supabase.from("images").delete().eq("id",i.id);if(d.error)alert(d.error.message);else loadImgs()}
  async function addCat(){if(!admin||!newCatName.trim())return;setBusy(true);const r=await supabase.from("categories").insert({name:newCatName.trim(),group_name:newCatGroup.trim()||"Diğer",sort_order:cats.length*10+10,is_active:true}).select("id,name,group_name,sort_order").single();setBusy(false);if(r.error){alert(r.error.message);return}setCatDialog(false);setNewCatName("");setNewCatGroup("Özel Günler");await loadCats();if(r.data){setCatId(r.data.id);setOpenGroup(r.data.group_name)}}
  async function delCat(c:Cat){if(!admin)return;const ok=confirm(`“${c.name}” kategorisi kaldırılsın mı?\n\nBu işlem kategorideki görselleri silmez.`);if(!ok)return;setBusy(true);const r=await supabase.from("categories").update({is_active:false}).eq("id",c.id);setBusy(false);if(r.error){alert(r.error.message);return}if(catId===c.id)setCatId("");await loadCats()}
- function download(i:Img){const a=document.createElement("a");a.href=i.image_url;a.download=i.title||"kartpostal";a.target="_blank";document.body.appendChild(a);a.click();a.remove()}
+ async function downloadPng(i:Img){
+  try{
+   const r=await fetch(i.image_url,{mode:"cors"});
+   if(!r.ok)throw new Error("Görsel alınamadı");
+   const blob=await r.blob();
+   const bitmap=await createImageBitmap(blob);
+   const canvas=document.createElement("canvas");
+   canvas.width=bitmap.width;canvas.height=bitmap.height;
+   const ctx=canvas.getContext("2d");
+   if(!ctx)throw new Error("PNG dönüştürme başlatılamadı");
+   ctx.drawImage(bitmap,0,0);bitmap.close();
+   const png=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error("PNG oluşturulamadı")),"image/png"));
+   const url=URL.createObjectURL(png),a=document.createElement("a");
+   const safe=(i.title||"kartpostal").replace(/[\\/:*?"<>|]+/g,"-").trim()||"kartpostal";
+   a.href=url;a.download=`${safe}.png`;document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(x){alert(x instanceof Error?x.message:"PNG indirme başarısız")}
+ }
  function toggleTheme(){const n=theme==="dark"?"light":"dark";setTheme(n);localStorage.setItem("temas-theme",n)}
 
  return <main className={`app ${theme}`}>
@@ -68,12 +85,12 @@ export default function CatalogApp(){
     </div>
    </header>
    {busy&&<p className="busy">İşlem sürüyor…</p>}
-   <div className={`gallery ${view}`}>{visible.map((i,idx)=><article key={i.id}><button className="pic" onClick={()=>setModal((page-1)*SIZE+idx)}><img src={i.image_url} alt={i.title||"Katalog görseli"}/></button><footer><span>{i.title||"İsimsiz görsel"}</span><div>{admin&&<button onClick={()=>download(i)}>⇩</button>}<button onClick={()=>setModal((page-1)*SIZE+idx)}>◉</button>{admin&&<button onClick={()=>del(i)}>×</button>}</div></footer></article>)}</div>
+   <div className={`gallery ${view}`}>{visible.map((i,idx)=><article key={i.id}><button className="pic" onClick={()=>setModal((page-1)*SIZE+idx)}><img src={i.image_url} alt={i.title||"Katalog görseli"}/></button><footer><span>{i.title||"İsimsiz görsel"}</span><div>{admin&&<button onClick={()=>downloadPng(i)} title="PNG olarak indir" aria-label="PNG olarak indir">⇩</button>}{admin&&<button onClick={()=>del(i)} title="Görseli sil" aria-label="Görseli sil">×</button>}</div></footer></article>)}</div>
    {!visible.length&&<div className="empty">Bu kategoride henüz görsel yok.</div>}
    <nav><button disabled={page===1} onClick={()=>setPage(page-1)}>‹</button>{Array.from({length:pages},(_,i)=>i+1).map(n=><button className={page===n?"active":""} onClick={()=>setPage(n)} key={n}>{n}</button>)}<button disabled={page===pages} onClick={()=>setPage(page+1)}>›</button></nav>
   </section>
 
-  {modal!==null&&filtered[modal]&&<div className="modal" onClick={e=>{if(e.target===e.currentTarget)setModal(null)}}><button className="close" onClick={()=>setModal(null)}>×</button><button className="prev" onClick={()=>setModal((modal-1+filtered.length)%filtered.length)}>‹</button><img src={filtered[modal].image_url} alt={filtered[modal].title||"Katalog görseli"}/><button className="next" onClick={()=>setModal((modal+1)%filtered.length)}>›</button>{admin&&<button className="mdown" onClick={()=>download(filtered[modal])}>Görseli indir</button>}</div>}
+  {modal!==null&&filtered[modal]&&<div className="modal" onClick={e=>{if(e.target===e.currentTarget)setModal(null)}}><button className="close" onClick={()=>setModal(null)}>×</button><button className="prev" onClick={()=>setModal((modal-1+filtered.length)%filtered.length)}>‹</button><img src={filtered[modal].image_url} alt={filtered[modal].title||"Katalog görseli"}/><button className="next" onClick={()=>setModal((modal+1)%filtered.length)}>›</button>{admin&&<button className="mdown" onClick={()=>downloadPng(filtered[modal])}>PNG olarak indir</button>}</div>}
 
   {login&&<div className="backdrop" onClick={e=>{if(e.target===e.currentTarget)setLogin(false)}}><div className="dialog"><h2>Admin Girişi</h2><p className="dialogSub">Yönetim araçlarına erişmek için giriş yapın.</p><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="E-posta"/><input value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")doLogin()}} type="password" placeholder="Şifre"/>{error&&<p className="err">{error}</p>}<div><button onClick={()=>setLogin(false)}>İptal</button><button className="primary" disabled={busy} onClick={doLogin}>Giriş Yap</button></div></div></div>}
 
